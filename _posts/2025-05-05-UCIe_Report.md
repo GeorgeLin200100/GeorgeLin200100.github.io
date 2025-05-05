@@ -1,3 +1,4 @@
+---
 layout:     post
 title:      UCIe_report
 subtitle:   UCIe_report
@@ -6,8 +7,8 @@ author:     George Lin
 header-img: img/post-bg-ios9-web.jpg
 catalog: true
 tags:
-
-    - Interconnect
+- Interconnect
+---
 
 # Chiplet互联协议浅析——以UCIe为例
 
