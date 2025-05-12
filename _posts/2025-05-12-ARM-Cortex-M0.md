@@ -377,3 +377,44 @@ ahb_dmac databook中24页，software handshaking Interface总结。
 
 logical/cmsdk_ahb_master_mux/verilog/cmsdk_ahb_master_mux.v可以充当DMA和CPU之间的master_mux
 
+## arm modern soc textbook
+
+### SoC interconnect
+
+#### Interconnect Requirements
+
+1. single-word reads and writes (transaction中的最小操作)（write 需配有lane flags，可以控制到字节级）
+2. uncached reads and writes
+3. block or burst transfers
+4. broadcast and multicast transactions (allow the same data word to be written to more than one destination at a time) 
+   *pesudo DMA*： data are moved between two target devices, one reading and the other writing, while the initiating CPU core ignores the data on the bus (i.e, CPU is executing a dummy read transaction)
+   *Real DMA*: follow the same pattern as pesudo DMA however the initiator is a dedicated controller instead of a CPU core
+5. **Atomic Operations: ** 
+   *conventional operations:* test-and-set & compare-and-swap (both require two successive operations on an addressed location without pre-emption) (not scale well to multi-initiator systems)
+   *advanced operations:*:  load-linked & store-conditional
+6. **out-of-order delivery of the data**
+7. **cache consistency (data coherency)**
+8. **read-ahead or warm-up traffic**: read cycles whose results might not be needed but allow data to be loaded speculatively so that the data are available with lower latency if needed
+9. **debug transactions**
+10. **configuration operations**
+11. **tagged data** (track ownership of data, not visible to the programmer)
+
+
+
+#### Design Considerations
+
+1. the baseline connectivity matrix (records which initiators need to communicate with which targets)
+2. throughput (the amount of data it can move per unit time, measured in GB/s)
+3. latency (the time a transaction takes to complete) (a transaction may not be initiated until the previous transaction has returned its result)
+4. connectedness (full & equally serve each patterns --> over-engineering)
+5. energy consumption (proportional to the distance that data moves across the chip)
+6. real-time traffic with a guaranteed quality of service (QoS)
+7. avoid deadlock (a ring of components each waiting on the next)
+
+### Crossbar 4×4的三种实现方式
+
+![image-20241011094305947](../images/2025-05-12-ARM-Cortex-M0.assets/image-20241011094305947.png)
+
+左：分时复用结构。高电容结构。需要用N倍的快时钟。
+
+右：广播结构，噪声容易太大
