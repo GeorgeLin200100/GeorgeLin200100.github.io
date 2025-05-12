@@ -3,6 +3,9 @@ layout: page
 description: "Thinking will not overcome fear but action will."
 ---
 
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+<span id="busuanzi_container_site_pv">You Are the No.<span id="busuanzi_value_site_pv"></span> Visitor!</span>
+
 {% for post in paginator.posts %}
 <div class="post-preview">
     <a href="{{ post.url | prepend: site.baseurl }}">
@@ -40,6 +43,3 @@ description: "Thinking will not overcome fear but action will."
     {% endif %}
 </ul>
 {% endif %}
-
-<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
-<span id="busuanzi_container_site_pv">You Are the <span id="busuanzi_value_site_pv"></span> Visitor!</span>
