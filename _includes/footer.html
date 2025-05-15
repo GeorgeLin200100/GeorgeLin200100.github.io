@@ -324,10 +324,26 @@
     searchInput: document.getElementById('search-input'),
     resultsContainer: document.getElementById('results-container'),
     json: '{{ site.baseurl }}/search.json',
-    searchResultTemplate: '<li><a href="{url}"><div class="search-result-title">{title}</div><div class="search-result-excerpt">{excerpt}</div><div class="search-result-date">{date}</div></a></li>',
+    searchResultTemplate: '<li><a href="{url}"><div class="search-result-title">{title}</div><div class="search-result-context">{context}</div></a></li>',
     noResultsText: '<li>No results found</li>',
     limit: 10,
-    fuzzy: true
+    fuzzy: true,
+    templateMiddleware: function(prop, value, template) {
+      if (prop === 'content') {
+        const searchTerm = document.getElementById('search-input').value.toLowerCase();
+        const content = value.toLowerCase();
+        const index = content.indexOf(searchTerm);
+        if (index !== -1) {
+          const start = Math.max(0, index - 50);
+          const end = Math.min(content.length, index + searchTerm.length + 50);
+          let context = value.substring(start, end);
+          if (start > 0) context = '...' + context;
+          if (end < value.length) context = context + '...';
+          return context;
+        }
+      }
+      return value;
+    }
   })
 </script>
 
