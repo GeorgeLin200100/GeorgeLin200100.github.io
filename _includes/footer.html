@@ -268,6 +268,44 @@
 </script>
 {% endif %}
 
+<script src="https://unpkg.com/simple-jekyll-search@1.10.0/dest/simple-jekyll-search.min.js"></script>
+<script>
+  var searchInput = document.getElementById('search-input');
+  var resultsContainer = document.getElementById('results-container');
+  
+  SimpleJekyllSearch({
+    searchInput: searchInput,
+    resultsContainer: resultsContainer,
+    json: '{{ site.baseurl }}/search.json',
+    searchResultTemplate: '<li><a href="{url}"><div class="search-result-title">{title}</div><div class="search-result-context">{context}</div></a></li>',
+    noResultsText: '<li>No results found</li>',
+    limit: 10,
+    fuzzy: true,
+    templateMiddleware: function(prop, value, template) {
+      if (prop === 'content') {
+        var searchTerm = searchInput.value.toLowerCase();
+        var content = value.toLowerCase();
+        var index = content.indexOf(searchTerm);
+        if (index !== -1) {
+          var start = Math.max(0, index - 50);
+          var end = Math.min(content.length, index + searchTerm.length + 50);
+          var context = value.substring(start, end);
+          
+          if (start > 0) context = '...' + context;
+          if (end < value.length) context = context + '...';
+          
+          var regex = new RegExp(searchTerm, 'gi');
+          context = context.replace(regex, '<mark>$&</mark>');
+          
+          return context;
+        }
+        return '';
+      }
+      return value;
+    }
+  });
+</script>
+
 <style>
 .search-results {
     position: absolute;
@@ -298,15 +336,17 @@
     margin-bottom: 5px;
 }
 
-.search-results .search-result-excerpt {
+.search-results .search-result-context {
     font-size: 0.9em;
     color: #666;
     margin-bottom: 5px;
+    line-height: 1.4;
 }
 
-.search-results .search-result-date {
-    font-size: 0.8em;
-    color: #999;
+.search-results mark {
+    background-color: #ffeb3b;
+    padding: 0 2px;
+    border-radius: 2px;
 }
 
 #search-input {
@@ -317,33 +357,4 @@
     width: 200px;
 }
 </style>
-
-<script src="https://unpkg.com/simple-jekyll-search@1.10.0/dest/simple-jekyll-search.min.js"></script>
-<script>
-  SimpleJekyllSearch({
-    searchInput: document.getElementById('search-input'),
-    resultsContainer: document.getElementById('results-container'),
-    json: '{{ site.baseurl }}/search.json',
-    searchResultTemplate: '<li><a href="{url}"><div class="search-result-title">{title}</div><div class="search-result-context">{context}</div></a></li>',
-    noResultsText: '<li>No results found</li>',
-    limit: 10,
-    fuzzy: true,
-    templateMiddleware: function(prop, value, template) {
-      if (prop === 'content') {
-        const searchTerm = document.getElementById('search-input').value.toLowerCase();
-        const content = value.toLowerCase();
-        const index = content.indexOf(searchTerm);
-        if (index !== -1) {
-          const start = Math.max(0, index - 50);
-          const end = Math.min(content.length, index + searchTerm.length + 50);
-          let context = value.substring(start, end);
-          if (start > 0) context = '...' + context;
-          if (end < value.length) context = context + '...';
-          return context;
-        }
-      }
-      return value;
-    }
-  })
-</script>
 
