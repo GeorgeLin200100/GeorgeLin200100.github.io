@@ -280,7 +280,7 @@
     searchResultTemplate: '<li><a href="{url}"><div class="search-result-title">{title}</div><div class="search-result-context">{content}</div></a></li>',
     noResultsText: '<li>No results found</li>',
     limit: 10,
-    fuzzy: true,
+    fuzzy: false,
     templateMiddleware: function(prop, value, template) {
       if (prop === 'content') {
         var searchTerm = searchInput.value.toLowerCase();
