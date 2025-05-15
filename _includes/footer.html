@@ -313,40 +313,46 @@
     left: 0;
     right: 0;
     background: white;
-    border: 0px solid #ddd;
+    border: 0;
     border-radius: 0;
     box-shadow: none;
     z-index: 1000;
     max-height: 400px;
     overflow-y: auto;
     list-style-type: none;
-    padding-left: 0;
+    padding: 0;
     margin: 0;
+    line-height: 1;
 }
 
 .search-results li {
-    padding: 0px 0px;
-    border-bottom: 0px solid #eee;
+    padding: 0;
+    margin: 0;
+    border: none;
     list-style-type: none;
+    line-height: 1;
 }
 
 .search-results li:last-child {
-    border-bottom: none;
+    border: none;
 }
 
 .search-results .search-result-title {
     font-weight: normal;
     color: #0085a1;
     margin: 0;
+    padding: 0;
     font-size: 0.8em;
     display: inline;
+    line-height: 1;
 }
 
 .search-results .search-result-context {
     font-size: 0.75em;
     color: #666;
     margin: 0;
-    line-height: 0.9;
+    padding: 0;
+    line-height: 1;
     display: inline;
 }
 
@@ -357,6 +363,7 @@
 .search-results mark {
     background-color: #ffeb3b;
     padding: 0;
+    margin: 0;
     border-radius: 0;
 }
 
@@ -371,6 +378,9 @@
 .search-results a {
     text-decoration: none;
     display: block;
+    padding: 0;
+    margin: 0;
+    line-height: 1;
 }
 </style>
 
