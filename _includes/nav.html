@@ -24,6 +24,10 @@
                         <a href="{{ page.url | prepend: site.baseurl }}">{{ page.title }}</a>
                     </li>
                     {% endif %}{% endfor %}
+                    <li>
+                        <input type="text" id="search-input" placeholder="Search...">
+                        <ul id="results-container"></ul>
+                    </li>
                 </ul>
             </div>
         </div>
