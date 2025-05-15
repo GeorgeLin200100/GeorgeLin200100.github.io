@@ -268,12 +268,66 @@
 </script>
 {% endif %}
 
+<style>
+.search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    z-index: 1000;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.search-results li {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.search-results li:last-child {
+    border-bottom: none;
+}
+
+.search-results .search-result-title {
+    font-weight: bold;
+    color: #0085a1;
+    margin-bottom: 5px;
+}
+
+.search-results .search-result-excerpt {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.search-results .search-result-date {
+    font-size: 0.8em;
+    color: #999;
+}
+
+#search-input {
+    padding: 5px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin: 8px 0;
+    width: 200px;
+}
+</style>
+
 <script src="https://unpkg.com/simple-jekyll-search@1.10.0/dest/simple-jekyll-search.min.js"></script>
 <script>
   SimpleJekyllSearch({
     searchInput: document.getElementById('search-input'),
     resultsContainer: document.getElementById('results-container'),
-    json: '{{ site.baseurl }}/search.json'
+    json: '{{ site.baseurl }}/search.json',
+    searchResultTemplate: '<li><a href="{url}"><div class="search-result-title">{title}</div><div class="search-result-excerpt">{excerpt}</div><div class="search-result-date">{date}</div></a></li>',
+    noResultsText: '<li>No results found</li>',
+    limit: 10,
+    fuzzy: true
   })
 </script>
 
