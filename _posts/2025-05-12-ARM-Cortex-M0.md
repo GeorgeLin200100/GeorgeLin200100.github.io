@@ -8,6 +8,7 @@ header-img: img/post-bg-ios9-web.jpg
 catalog: true
 tags:
 - ARM
+- SoC
 ---
 
 #### 感觉对ARM的系统控制没有概念，决定学习arm-modern-soc.pdf
