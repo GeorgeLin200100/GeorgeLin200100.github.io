@@ -1,7 +1,3 @@
-
-
-
-
 ---
 
 layout:     post
@@ -14,7 +10,6 @@ catalog: true
 tags:
 
 - SoC
-
 ---
 
 
