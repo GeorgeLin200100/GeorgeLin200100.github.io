@@ -2,7 +2,7 @@
 
 layout:     post
 title:      时钟门控
-subtitle:   时钟门控（Clock Gating）
+subtitle:   淡极始知花更艳，愁多焉得玉无痕
 date:       2025-11-30
 author:     George Lin
 header-img: img/post-bg-ios9-web.jpg
