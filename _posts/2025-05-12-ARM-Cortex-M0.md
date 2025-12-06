@@ -7,7 +7,6 @@ author:     George Lin
 header-img: img/post-bg-ios9-web.jpg
 catalog: true
 tags:
-- ARM
 - SoC
 ---
 
