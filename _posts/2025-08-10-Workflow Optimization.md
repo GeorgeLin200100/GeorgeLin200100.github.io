@@ -5,7 +5,7 @@ title:      Workflow Optimization
 subtitle:   日常工作流优化
 date:       2025-08-10
 author:     George Lin
-header-img: img/post-bg-ios9-web.jpg
+header-img: img/post-bg-gen.png
 catalog: true
 tags:
 - blog

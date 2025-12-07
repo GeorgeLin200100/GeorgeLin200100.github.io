@@ -4,7 +4,7 @@ title:      ARM-Cortex-M0
 subtitle:   ARM-Cortex-M0
 date:       2025-05-12
 author:     George Lin
-header-img: img/post-bg-ios9-web.jpg
+header-img: img/post-bg-gen.png
 catalog: true
 tags:
 - SoC

@@ -5,7 +5,7 @@ title:      AI是实习生而非队友
 subtitle:   个人对于AI在工作流中扮演角色的思考
 date:       2025-07-31
 author:     George Lin
-header-img: img/post-bg-ios9-web.jpg
+header-img: img/post-bg-gen.png
 catalog: true
 tags:
 - blog

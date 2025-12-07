@@ -4,7 +4,7 @@ title:      Discrete Math
 subtitle:   Discrete Math
 date:       2024-11-27
 author:     George Lin
-header-img: img/post-bg-ios9-web.jpg
+header-img: img/post-bg-gen.png
 catalog: true
 tags:
 - Lessons

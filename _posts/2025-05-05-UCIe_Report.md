@@ -4,7 +4,7 @@ title:      UCIe_report
 subtitle:   UCIe_report
 date:       2025-05-05
 author:     George Lin
-header-img: img/post-bg-ios9-web.jpg
+header-img: img/post-bg-gen.png
 catalog: true
 tags:
 - Interconnect
