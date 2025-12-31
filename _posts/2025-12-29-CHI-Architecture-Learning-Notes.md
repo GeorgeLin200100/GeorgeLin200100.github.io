@@ -2,7 +2,7 @@
 layout: post
 title: CHI-Architecture-Learning-Notes
 subtitle: 有你有我雪中送火，翻天覆海不枉最初
-date: 2025-12-17
+date: 2025-12-29
 author: George Lin
 header-img: img/post-bg-gen.png
 catalog: true
@@ -83,7 +83,7 @@ ACE是valid-invalid, unique-shared, clean-dirty三对组合，CHI是valid-invali
 
 这里重点讲下CHI新增的两个状态，UDP (Unique Dirty Partial)和UCE (Unique Clean Empty)。这两者基本功能都是省了一次内存到缓存的缓存行读，最终优化了写入性能，降低带宽浪费。
 
-### UDP (Unique Dirty Partial)
+#### UDP (Unique Dirty Partial)
 
 UDP解决的是**“我只想写一部分，而且我懒得（或者没能力）先把旧数据读回来合成”** 的问题，它把“合并数据”这个重活累活从 CPU/设备端甩给了总线系统（HN-F）。它是为了高性能 SoC 处理碎片化数据写入而引入的特殊状态。
 
@@ -106,7 +106,7 @@ UDP 状态在 **IO Coherent** 场景（比如 DMA 或 PCIe 设备接入）中有
 
 需要注意，在 UDP 状态下，虽然 RN 本地的数据是不完整的，但 CHI 协议通过 **Byte Enable (BE)** 信号解决了问题。 当 UDP 状态的数据被写回（Evict）或者被其他核 Snoop 时，它会明确告诉总线：*“这 64 字节里，只有第 0-3 字节是我的新数据，剩下的字节请以内存或下游 Cache 为准。”*
 
-### UCE (Unique Clean Empty)
+#### UCE (Unique Clean Empty)
 
 CHI 协议引入 **UCE (Unique Clean Empty)** 的意义在于**解耦了“所有权”和“数据内容”**。
 
@@ -131,4 +131,130 @@ CHI 协议引入 **UCE (Unique Clean Empty)** 的意义在于**解耦了“所�
 | **步骤 3**   | 覆盖数据，状态变为 Unique Dirty | 状态进入 **UCE**，直接填入新数据 |
 | **带宽消耗** | **高** (Data 占用了总线带宽)    | **极低** (只有控制信令)          |
 
-### 
+#### Unique/Shared, Clean/Dirty
+
+一句话总结：Unique一定是Unique的，Shared不一定是Shared的，Dirty一定是Dirty的，Clean不一定是Clean的
+
+Unique：该缓存行只在这个cache中存在
+
+Shared: 该缓存行不一定只在这个cache中存在（可能只在这个cache，也可能在多个cache中）
+
+Dirty: 该缓存行的数据与主存不同，且有责任更新主存
+
+Clean：该缓存行的数据可能与主存不同（可能相同也可能不同），但不负有更新主存的责任
+
+### SAM（System Address Map）
+
+地址映射表，RN中的SAM用于将地址翻译成HN节点索引，HN中的SAM用于将地址翻译成SN索引。需要注意的是，同一个地址被不同RN中的SAM路由到的HN应该一致。
+
+### CHI节点的六个通道
+
+![image-20251230142357181](../images/2025-12-29-CHI-Architecture-Learning-Notes.assets/image-20251230142357181.png)
+
+每个RN-F都有六个通道，往外发的有TXREQ, TXDAT, TXRSP三个，往内收的有RXSNP, RXDAT, RXRSP三个。
+
+具体功能看图。这里仅举几个例子。
+
+比如RN-F要发起一笔写，用到的就是TXREQ, TXDAT, RXRSP. 最后还要用TXRSP跟HN说声。
+
+RN-F要发起一笔读，用到的就是TXREQ, RXDAT, RXRSP，最后还要用TXRSP跟HN说声。
+
+RN-F被snoop了，用到的就是RXSNP和TXRSP，如果snoop成功了，还得用到TXDAT.
+
+
+
+比较惊艳的是，从CHI-E开始，允许复制通道，进而灵活地控制带宽。这种复制可以是两个粒度：
+
+- 粗粒度：复制一整套六个通道，如图3-4
+- 细粒度：复制单个通道，如图3-5
+
+![image-20251230143204081](../images/2025-12-29-CHI-Architecture-Learning-Notes.assets/image-20251230143204081.png)
+
+![image-20251230143214255](../images/2025-12-29-CHI-Architecture-Learning-Notes.assets/image-20251230143214255.png)
+
+
+
+### Flits
+
+![image-20251230143503549](../images/2025-12-29-CHI-Architecture-Learning-Notes.assets/image-20251230143503549.png)
+
+因为是片内总线，CHI里的Flit不用像PCIe一样序列化，上图展示了Request Flit的基本结构
+
+有几个要点值得注意:
+
+- 每个Flit都伴有一根valid线
+- Opcode域最重要，标明了传输的类型（比如ReadOnce, CleanInvalid等）
+- 四个ID：SrcID, TgtID, TxnID, DBID。不同类型Flit中需求的不同ID如下表：
+  - SrcID标明是谁发的这个Flit
+  - TgtID表明这个Flit要发去哪里
+  - TxnID类似AXI里面的ID，是点对点传输中不同的transaction的区分，功能是支持flit的outstanding（最大256或1024）
+  - DBID（Data Buffer ID）比较有意思，只在Response和Data Flit中出现。 我在下面专门一个开section说明。
+
+![image-20251230150655436](../images/2025-12-29-CHI-Architecture-Learning-Notes.assets/image-20251230150655436.png)
+
+### DBID
+
+DBID在写/读操作中的作用不一样。在写操作中，主要用于数据流向控制，即告诉发送方往哪里填数据（如果DBID耗尽，写请求会卡死）；在读操作中，主要用于资源的清理（如果DBID释放慢，HN的Tracker会满，无法接新的读请求）。
+
+##### 写操作中的DBID
+
+当请求者（Requester）发送写请求后，响应者（Completer，如 HN-F）如果准备好了接收数据的 Buffer，会返回一个带有 **DBID** 的响应（如 `DBIDResp`）。这个 DBID 就代表了接收方内部那个特定的数据缓冲区。发送方在后续发送数据包（Data Packet）时，会将收到的这个 **DBID** 填入数据包的 **TxnID** 字段中。这样接收方看到数据包时，立刻就能通过 DBID 知道这组数据属于哪个之前的写请求，并直接存入预留的 Buffer。通过 DBID，接收方可以精确控制流入的数据量。只有发放了 DBID，发送方才能传数据，这有效防止了接收端 Buffer 溢出。
+
+##### 读操作中的DBID
+
+读操作中，DBID主要用于两个方面：
+
+首先是在SN与HN的交互中，作为读请求中的回传标识（Read Receipt）。当 HN 向 SN 发起读请求时，SN 可能会返回一个 `ReadReceipt`（读收据）。SN 通过这个响应告诉 HN：“我已经收到你的读请求了，并且给这个请求分配了一个 **DBID**（槽位）。这样 HN 就知道这个请求已经在 SN 的队列里排上号了，HN 可以根据这个确认信号来管理自己的事务追踪器（Tracker）。
+
+其次是在RN收到数据后发给HN的CompAck（完成确认）中，帮助HN释放对应buffer资源。对于某些读操作（如 `ReadShared`），当 RN 收到数据后，需要发送一个 `CompAck`（完成确认）给 HN。此时，HN 在之前给 RN 发送数据时，可能会带上一个 **DBID**。RN 在回复 `CompAck` 时，会把这个 **DBID** 带回去。这告诉 HN：“我收到数据了，你之前在内部为这个事务所占用的那个 Buffer（由该 DBID 标识）现在可以被释放，给别人用了。”
+
+
+
+# CHI事务流程
+
+CHI协议在底层架构上和Non-Coherent的AXI总线显著不同，其事务流程也更为复杂。下面将按照Opcode分类进行transaction流程的说明，分为两个层面，一是事务流，二是四个ID怎么用。
+
+### ReadNoSnp
+
+假设有RN 0-2, HN 3-4, SN 5。RN0是读的发起方，SN5是目标。
+
+1. RN0通过SAM选定HN3，通过TXREQ通道向HN3发送ReadNoSnp请求。
+2. HN3通过SAM选定SN5，通过TXREQ通道向SN5发送ReadNoSnp请求。
+3. SN5通过TXDAT通道向HN3返回CompData信息，包含数据。
+4. HN3向RN0返回CompData信息，包含数据，走的是HN3的TXDAT, RN0的RXDAT通道。
+5. 如果在最开始的ReadNoSnp请求中ExpCompAck标志位（Expect Completion acknowledgement）被设置为1，则RN0需要向HN3返回CompAck信息
+6. HN3收到CompAck信息后会放行对RN0刚刚读到这个缓存行的Snoop（保证Sequential Consistency）
+
+![image-20251231101620524](../images/2025-12-29-CHI-Architecture-Learning-Notes.assets/image-20251231101620524.png)
+
+### WriteNoSnp
+
+同样的，假设有RN 0-2, HN 3-4, SN 5。RN0是写的发起方，SN5是目标。
+
+1. RN0通过TXREQ通道向HN3发送WriteNoSnp请求。
+2. HN3通过TXRSP通道向RN0发送CompDBIDResp信息，表明自己可以通过某个ID的Data Buffer接受写数据.
+3. 以下两个事件可以以任何次序发生：
+   1. HN3向SN5发送WriteNoSnp信息，SN5向HN3返回CompDBIDResp信息，表明自己可以通过某个ID的Data Buffer接受写数据.
+   2. RN0向HN3通过TXDAT通道发送WriteNoSnp所需的写数据
+4. HN3把写数据通过TXDAT通道发送给SN5
+
+注意如果在初始的WriteNoSnp请求中，ExpCompAck=1，则在RN发送完写数据并且确认收到了CompDBIDResp之后，RN会向HN发送一个CompAck消息，HN收到CompAck后，菜回真正关闭（Deallocate）这个事务在内部Tracker中的记录。
+
+### MakeUnique
+
+MakeUnique请求中包含snoop操作。
+
+假设还是一样的，RN 0-2, HN 3-4, SN 5。RN0是MakeUnique的发起方，HN3是Snoop的发起方。
+
+1. RN0对HN3发出MakeUnique消息，指示想把A地址的缓存行独占。
+2. HN3向RN1和RN2发出SnpMakeInvalid请求（属于Snoop）
+3. RN1和RN2将地址A的缓存行Invalidate之后，按任意顺序向HN3返回SnpResp消息
+4. HN3在收到RN1和RN2的SnpResp之后，向RN0返回Comp_UC消息（Unique Clean），表明Snoop已经都返回了
+5. 此时假如RN2向HN3发起读地址A的ReadShared请求，HN3会阻塞这个请求，因为RN0还没有给CompAck给HN3
+6. RN0向HN3发送CompAck消息，正式终结这个事务。
+7. HN3收到CompAck消息之后放行刚刚RN2的ReadShared请求，向RN0和RN1发送SnpShared消息。
+8. 以下两个事件以任意顺序完成：
+   1. RN0返回SnpRespData，把最新的A地址的数据给到HN3
+   2. RN1返回SnpResp，表明自己没有A地址的数据
+9. 收到RN0返回的数据后，HN3把数据给到RN2
+10. RN2向HN3发送CompAck信息，该事务完成。
