@@ -14,7 +14,7 @@ tags:
 
 # 系列博客说明
 
-本系列博客将围绕片内一致性总线CHI协议展开。首篇博客将基于ARM官方的Learn the architecture - Introducing AMBA CHI文档进行总结，意在对CHI协议的基本定义、事务流程及性能优化方案支持三个方面有初步的认知。本博客不会照搬协议，会掺杂一些个人理解，不当之处请指正。之后的博客可能会聚焦CMN-700具体实现、CHI-C2C协议、gem5-c2c建模或CHI与UCIe的交互四方面展开，意在通过约8-10篇博客，初步掌握CHI协议、一致性实现。
+本系列博客将围绕片内一致性总线CHI协议展开。首篇博客将基于ARM官方的Learn the architecture - Introducing AMBA CHI文档进行总结，意在对CHI协议的基本定义、事务流程及事务类型三个方面有初步的认知。本博客不会照搬协议，会掺杂一些个人理解，不当之处请指正。之后的博客可能会聚焦CHI协议性能优化方案、CMN-700具体实现、CHI-C2C协议、gem5-c2c建模或CHI与UCIe的交互四方面展开，意在通过约8-10篇博客，初步掌握CHI协议、一致性实现。
 
 # CHI协议的定位
 
@@ -207,6 +207,29 @@ DBID在写/读操作中的作用不一样。在写操作中，主要用于数据
 首先是在SN与HN的交互中，作为读请求中的回传标识（Read Receipt）。当 HN 向 SN 发起读请求时，SN 可能会返回一个 `ReadReceipt`（读收据）。SN 通过这个响应告诉 HN：“我已经收到你的读请求了，并且给这个请求分配了一个 **DBID**（槽位）。这样 HN 就知道这个请求已经在 SN 的队列里排上号了，HN 可以根据这个确认信号来管理自己的事务追踪器（Tracker）。
 
 其次是在RN收到数据后发给HN的CompAck（完成确认）中，帮助HN释放对应buffer资源。对于某些读操作（如 `ReadShared`），当 RN 收到数据后，需要发送一个 `CompAck`（完成确认）给 HN。此时，HN 在之前给 RN 发送数据时，可能会带上一个 **DBID**。RN 在回复 `CompAck` 时，会把这个 **DBID** 带回去。这告诉 HN：“我收到数据了，你之前在内部为这个事务所占用的那个 Buffer（由该 DBID 标识）现在可以被释放，给别人用了。”
+
+### Request Order和Endpoint Order
+
+这俩都属于CHI的保序机制。Order字段在最初的请求中定义。
+
+Request Order（请求顺序）是较窄范围的保序约束。它保证来自**同一个发起者 (Requester)** 且发往**同一个内存地址 (Same Address)** 的多个事务，按照它们发出的顺序被处理，即：约束范围仅限于相同地址。发起者（如 RN）在发出后续请求前，必须先收到前一个请求的确认（如 `ReadReceipt` 或 `DBIDResp`），以确保前一个请求已经到达了系统的“保序点”（Point of Serialization）。典型的应用场景包括“读后写 (RAW)”或“写后读 (WAR)”同一变量。
+
+Endpoint Order（端点顺序）是更宽、更强的保序约束。它保证来自**同一个发起者**且发往**同一个端点地址范围 (Same Endpoint Address Range)** 的所有事务，按照它们发出的顺序到达该端点，即：约束范围是整个**地址段**（通常对应一个具体的 Slave 节点，如某个内存控制器或外设）。典型应用场景比如顺序访问外设寄存器。例如，你先配置 DMA 的源地址寄存器，再配置目的地址寄存器，最后启动 DMA。这三个操作地址不同，但必须按序到达同一个外设端点。
+
+可见，**Endpoint Order 包含 Request Order。** 如果你指定了 Endpoint Order，那么同一地址的顺序自然也被保证了。
+
+发起者怎么判断何时可以发起下一个请求？CHI协议给出的答案是：如果是读操作(ReadNoSnp和ReadOnce)，发起者收到ReadReceipt信息之后，即可发起下一个请求。如果是写操作（WriteNoSnp和WriteUnique），发起者收到DBIDResp信息后，即可发起下一个请求。
+
+可以发现，Order字段和HN中序列化点（PoS, Point of Serialization）作用似乎相同，都是用来保序的。那为什么对于非一致性事务（ReadNoSnp/WriteNoSnp）和弱一致性事务（ReadOnce（读到后用完不保留副本）/WriteUnique（推出数据后RN不留副本）），要多此一举加上一个Order字段呢？非一致性事务很好理解，一般不过HN,直接到SN, 因而不会参加HN保序。假如此时有保序需求（比如刚刚提到的顺序访问DMA寄存器），加上Order字段是一种轻量化的告知SN需要保序的手段。对于弱一致性事务，由于不需要同步Cache状态，它们经常绕过 PoS 逻辑以追求低延迟。`Order` 字段是 RN 给互连结构的指令，告诉它在不走一致性流程时，依然要维护逻辑上的先后顺序。
+
+### CHI的Retry机制
+
+CHI的Retry机制有些特别。当传输不成功时，发起者并不会一直重发请求，而是会等待接收者告知发起者特定槽位已经空出，可以发起重传后，才会发起一次重传，且该次重传可以确保成功。具体事务流程如下：
+
+1. 发起者在Request Flit中设置AllowRetry=1，并且把credit类型字段PCrdType设置为0，发给接收者。
+2. 接收者如果Requester Buffer已经满了，就返回给发起者一个RetryAck信息。该信息中，会把PCrdType字段设置为一个特定值，比如2.
+3. 当接收者能接收这个Request了，就会通过TXRSP通道向发起者发送一条PCrdGrant信息（指明PcrdType=2）
+4. 发起者收到PCrdGrant信息并确认其与RetryAck中的PcrdType match之后，就会把AllowRetry设置为0，把刚刚的Request Flit发给接收者。接收者必须接收。
 
 
 
