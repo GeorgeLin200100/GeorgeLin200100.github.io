@@ -281,3 +281,139 @@ MakeUnique请求中包含snoop操作。
    2. RN1返回SnpResp，表明自己没有A地址的数据
 9. 收到RN0返回的数据后，HN3把数据给到RN2
 10. RN2向HN3发送CompAck信息，该事务完成。
+
+
+
+# CHI事务类型
+
+CHI事务类型繁多，可分为Read、Write、Dataless、Combined Write、Atomic、Other六类。
+
+### 读事务（Read Transactions）
+
+#### 一句话搞清楚CHI不同读事务的语义
+
+CHI 协议中复杂的读事务可以用以下的比喻快速理解，我们把 **互连网络（ICN）** 比作“图书馆管理员”，把 **Requester** 比作“读者”：
+
+- **ReadNoSnp**：跳过管理员直接去私人书库拿书，不管别人手里有没有副本（非一致性读取）。
+- **ReadNoSnpSep**：和 ReadNoSnp 一样，但允许管理员先把“书找到了”的消息和“书本内容”分两次告诉我。
+- **ReadOnce**：路过顺便看一眼，不打算把书借走存放在自己家里（不存入 Cache）。
+- **ReadOnceCleanInvalid**：我看一眼就走，而且建议管理员把馆里所有副本都擦干净并放回仓库（Clean & Invalidate 提示）。
+- **ReadOnceMakeInvalid**：我看一眼就走，而且顺手把馆里其他人的副本全撕了，还不负责修补（强制 Invalidate 且不写回）。
+- **ReadClean**：我要借书回家看，但我有洁癖，全系统谁手里的书要是脏了，必须洗干净还给图书馆（强制写回内存）。
+- **ReadNotSharedDirty**：我要借书，但我绝不当那个负责洗干净书的人，谁爱洗谁洗（拒收 SharedDirty 责任）。
+- **ReadShared**：我要借书，怎么快怎么来，书脏不脏、谁负责洗我都不在乎。
+- **ReadUnique**：我要借书而且我要在书上涂改，请管理员立刻把别人手里的书全部回收并销毁。
+- **ReadPreferUnique**：我大概率要改书，如果现在没人用就给我独占权，要是有人正用着，我也能接受先共享着看。
+- **MakeReadUnique**：书我已经借到手了，现在我想申请改书的权限，请管理员把别人的副本都撤了。
+
+
+
+#### 一句话搞清楚何时选用何种CHI读事务
+
+**ReadNoSnp**：当你访问**非相干区域**（如配置寄存器或私有内存）时使用，因为不需要和其他核心商量，速度最快。
+
+**ReadNoSnpSep**：场景同上，但当你希望在数据还没准备好时，先让总线确认“收到请求”以**释放资源**时选用。
+
+**ReadOnce**：当你只需要读一次数据（如**搬运数据包或流媒体**）且不想让它占用你宝贵的缓存空间时选用。
+
+**ReadOnceCleanInvalid**：当你读完数据后确定**短期内没人会再用**，想顺便帮系统“清理垃圾”并把脏数据刷回内存时选用。
+
+**ReadOnceMakeInvalid**：当你读完数据后**确定该数据已作废**（如已处理的丢弃包），想直接从系统中抹除它且不在乎数据丢失时选用。
+
+**ReadClean**：当你需要长期持有数据，且为了**后续能快速关机/休眠**，想逼系统现在就把所有脏副本洗干净写回内存时选用。
+
+**ReadNotSharedDirty**：当你作为消费者读数据，但你的**缓存很小**，不想在被踢出（Evict）时背负写回内存的沉重负担时选用。
+
+**ReadShared**：当你只想做最通用的**普通读取**操作，不带特殊目的，只求以最灵活、最低延迟的方式拿到数据副本时选用。
+
+**ReadUnique**：当你准备**立即修改**某个变量（如执行 `store`）时选用，一步位到位拿走所有人的权限。
+
+**ReadPreferUnique**：当你准备做**原子操作（自旋锁）**时选用，它在不打断别人进度的前提下，尽量帮你提前抢到独占权。
+
+**MakeReadUnique**：当你手里**已经有这行数据**，但突然想从“只读”升级为“修改”模式时，为了省带宽不重传数据而选用。
+
+
+
+#### CHI协议上对读事务的详细阐述
+
+##### ReadNoSnp
+
+从RN向Non-snoopable的地址区间读数据，或者从HN向任何地址区间读数据
+
+##### ReadNoSnpSep
+
+从HN向SN读数据，且要求SN仅发data response。Sep是把data response和非data的response Seperate开的意思。
+
+##### ReadOnce
+
+向Snoopable的地址区间拿数据的Snapshot。换言之，读完不会保留在自己的缓存行中。
+
+##### ReadOnceCleanInvalid
+
+在ReadOnce的基础上，建议（hint）持有该缓存行的Node把该缓存行CleanInvalid掉（如果Dirty，要先写回memory）
+
+用法：某个缓存行长远来看仍然有用，但用完这次之后短期内不会再被用到，就可以发起一个ReadOnceCleanInvalid
+
+注意事项：
+
+1. 该缓存行的CleanInvalid是个hint，不能保证完成。
+2. ReadOnceCleanInvalid 可能会意外地破坏其他处理器（Master/Agent）正在进行的“独占访问”（Exclusive Access/Atomic 操作），从而导致系统性能下降或逻辑重试。比如，假设 CPU A 正在对地址 `0x100` 进行独占访问（准备写入）。此时 CPU B 发起了一个 `ReadOnceCleanInvalid` 访问同一个地址 `0x100`。根据协议，`ReadOnceCleanInvalid` 可能会导致 CPU A 缓存里的那行数据被 **Invalidate（失效）**。 一旦 CPU A 的缓存行失效，它的**独占监视器（Exclusive Monitor）就会重置**。结果就是 CPU A 的独占访问会**失败（Fail）**，必须重新开始。也就是说，如果你对一个正被频繁进行原子操作（如锁、信号量）的热点内存区域使用这个指令，会导致其他核心的原子操作不断失败和重试，进而引发严重的**缓存颠簸（Cache Thrashing）**，降低系统效率。
+
+##### ReadOnceMakeInvalid
+
+与ReadOnceCleanInvalid的唯一不同是，建议持有该缓存行的Node把该缓存行MakeInvalid掉（如果Dirty，可以直接丢弃，不需要写回memory）
+
+用法：某个缓存行用完这次就不会再被用到了，就可以发起一个ReadOnceMakeInvalid，相比ReadOnceCleanInvalid节省一次WriteBack to memory
+
+注意事项：
+
+1. 该缓存行的MakeInvalid是个hint，不能保证完成
+2. 与ReadOnceCleanInvalid一样，ReadOnceMakeInvalid可能会意外地破坏其他处理器（Master/Agent）正在进行的“独占访问”（Exclusive Access/Atomic 操作），从而导致系统性能下降或逻辑重试。
+3. ReadOnceMakeInvalid会导致Dirty的缓存行丢失，是有损的。
+4. 在ReadOnceMakeInvalid事务中，“失效操作（Invalidation）”与“数据返回（Read Data Response）”之间具有时序与可见性约束。即：
+   1. 在数据交给请求者之前，必须先锁定（commit）“让别人失效”这件事。commit不代表动作已经全部完成，而是代表这个失效请求已经在总线互连矩阵中排好队，且**不可撤回**。（否则，如果系统先把数据给了你（请求者），但还没把其他人的缓存标记为“准备失效”，那么在微观时序上，可能会出现短暂的窗口期，导致两个 Agent 认为自己都拥有对该数据的合法控制权，或者看到不一致的值。）
+   2. 另一方面，需要保证，任何在 拿到该缓存行的数据之后才开始的对该缓存行的写入操作，都绝对不会被 A 的那个失效动作所干扰。（如果没有这个规则：假设Agent A 发起 `ReadOnceMakeInvalid`。数据发回给了 A。紧接着，Agent B 发起了一个新的 `Write` 事务（更新了该数据）。此时Agent A 延迟的那个“使无效”信号才慢慢悠悠地到达，结果把 Agent B 刚刚写好的新数据给“误杀”使无效了。）
+5. 返回给Requester的数据应该处于I或UC或UD状态
+
+##### ReadClean
+
+ReadClean 的语义是：“我需要这份数据，但**我不打算修改它**，如果系统中有脏数据（Dirty Data），请帮我把它洗干净（写回内存/下级缓存）。”也就是，Requester拿到的数据一定是UC或者SC状态。
+
+用法：
+
+1. Requester打算把这个读回来的数据放进不能承担Dirty写回功能的cache里面，所以强制要求别人给自己的是clean状态。
+2. 强制去脏。比如当一个集群（Cluster）或核心准备进入**休眠或关断状态**时，它必须清理掉所有的 Dirty Cache lines。如果此时另一个 Agent（比如 GPU 或另一个 CPU）使用 **ReadClean** 读取了这些数据，它实际上“顺手”帮正在准备休眠的核心完成了“写回内存”的工作。这样，当核心真正进入休眠指令时，需要处理的 Dirty 数据量已经大大减少，从而加快了进入低功耗状态的速度。
+3. 避免Dirty状态的来回传递让系统管理变得复杂。如果 Dirty 数据一直在核心之间通过 ReadShared 传递（Dirty Tick-tack），那么总有一个核心必须承担“最后将数据写回内存”的责任。**ReadClean** 提供了一个明确的契机，在读取的同时解除这种“更新内存”的责任负担，保持系统状态的“整洁”。
+
+##### ReadNotSharedDirty
+
+ReadNotSharedDirty的语义是：拒绝在共享状态下承担 Dirty 责任。也就是返回的数据可以是UC, UD或SC，但绝对不可以是SD.
+
+##### ReadShared
+
+ReadShared是最基础，最通用的读取事务。ReadShared允许请求者接收任何合法的共享状态（包括UC、UD、SC和SD）
+
+##### ReadUnique
+
+仅允许返回的数据是UC或UD状态，保证自身独占性。
+
+##### ReadPreferUnique
+
+ReadPreferUnique是相对比较温和的ReadUnique。如果另一个核心正在进行独占操作，读到的数据会是shared状态而不是unique状态。你可以把 **ReadPreferUnique** 想象成一个**“有礼貌的预定”**： “老板，我想买这张桌子（Unique），如果现在没人订，直接给我；如果已经有人在付钱了，我就先站在旁边看看（Shared），不打扰人家结账。”
+
+用法：
+
+1. 比如某个RN需要进行Atomic操作，如果没有这个事务，处理器可能先用 `ReadShared` 读到数据（获得 Shared 状态），发现要修改时，必须再发一个 `CleanUnique` 事务来申请独占权。这需要**两次**往返总线。有了 ReadPreferUnique，相当于直接告诉总线：“我一会儿大概率要改，如果方便的话，直接给我 **Unique** 状态。” 如果成功拿到 Unique，后续的写操作就是“本地操作”，无需再次申请权限，极大地提升了效率。
+2. 在多核争抢同一个锁（Exclusive Access）时，如果所有核都强行要求 `ReadUnique`，它会强制让其他所有核心的缓存行失效（Invalidate）。后果是：如果 A 刚拿到 Unique 还没来得及写，B 的 `ReadUnique` 就把 A 给失效了；接着 C 又把 B 失效了。这会导致“缓存颠簸”（Cache Thrashing），谁也无法完成任务。ReadPreferUnique 的聪明之处在于它是一种**温和的请求**。如果 HN-F 发现现在正好有另一个核心正在进行独占操作（Exclusive sequence），它会降级只给你 **Shared** 状态。这允许请求者至少能先“读”到值（比如在自旋锁中轮询状态），而不会粗鲁地打断那个正在执行关键写入操作的核心。
+
+##### MakeReadUnique
+
+MakeReadUnique事务的语义是：当请求者已经拥有数据，但缺乏“修改权限”时，以最小的代价获取独占权（Unique 权限）。
+
+用法：
+
+1. 与ReadUnique相比，优化了带宽，只传权力，不传数据。**ReadUnique:** 无论请求者有没有数据，都会触发Data Response。MakeReadUnique如果互连网络（HN-F）确认请求者已经拥有最新的数据副本，它可以**只返回权限确认**（Completion），而不传输数据。在写密集型应用中，这极大地节省了总线数据带宽，降低了功耗。
+
+注意事项：
+
+1. 在复杂的总线环境中，可能会发生这种情况：**Agent A** 发出 `MakeReadUnique` 想要升级权限。**与此同时，Agent B** 发出了一个 `ReadUnique`，导致总线向 Agent A 发送了一个 **Snoop Invalidate**（要求 A 删掉自己的数据）。如果按照简单的逻辑，Agent A 的数据没了，它的权限升级请求似乎应该失败并重试。 但 CHI 的设计是， 如果 Agent A 在等待 `MakeReadUnique` 结果时，数据被别人的 Snoop 给“抢”走了。总线（HN-F）**必须保证**在最后的响应中，重新把最新的数据再发还给 Agent A。即：Agent A 永远不需要因为“数据中途被抢”而重新发送请求。这保证了**前向进度（Forward Progress）**，避免了在高竞争下的死锁或无限重试。
