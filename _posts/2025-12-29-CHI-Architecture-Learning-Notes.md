@@ -417,3 +417,141 @@ MakeReadUnique事务的语义是：当请求者已经拥有数据，但缺乏“
 注意事项：
 
 1. 在复杂的总线环境中，可能会发生这种情况：**Agent A** 发出 `MakeReadUnique` 想要升级权限。**与此同时，Agent B** 发出了一个 `ReadUnique`，导致总线向 Agent A 发送了一个 **Snoop Invalidate**（要求 A 删掉自己的数据）。如果按照简单的逻辑，Agent A 的数据没了，它的权限升级请求似乎应该失败并重试。 但 CHI 的设计是， 如果 Agent A 在等待 `MakeReadUnique` 结果时，数据被别人的 Snoop 给“抢”走了。总线（HN-F）**必须保证**在最后的响应中，重新把最新的数据再发还给 Agent A。即：Agent A 永远不需要因为“数据中途被抢”而重新发送请求。这保证了**前向进度（Forward Progress）**，避免了在高竞争下的死锁或无限重试。
+
+### 不带数据的事务（Dataless Transactions）
+
+#### 一句话搞清楚CHI不同Dataless事务的语义
+
+##### 1. Stash 系列（提前送货上门）
+
+- **StashOnceUnique**：管家主动把包裹塞进你的储物柜，并顺便把开锁的独占钥匙交给你，方便你待会直接修改。
+- **StashOnceSepUnique**：管家先告诉你“包裹马上就位”，让你先去忙，他随后再异步把包裹和独占钥匙送进你的柜子。
+- **StashOnceShared**：管家把包裹放进你的柜子，但只给你一份复印件（读权限），因为他知道你只是想看看，不想负责修改。
+- **StashOnceSepShared**：管家先发个短信确认收到了送货请求，然后后台慢慢把这份“只读”的包裹副本送达你的柜子。
+
+##### 2. Clean 系列（大扫除与同步）
+
+- **CleanShared**：管家要求你把手里的脏包裹复印一份存入总仓库（PoC），但允许你继续留着这份包裹慢慢看。
+- **CleanSharedPersist**：管家不仅要求你把包裹复印件交回仓库，还要亲眼盯着仓库管理员把它锁进永不掉电的保险柜（PoP）。
+- **CleanSharedPersistSep**：管家先确认数据已交回仓库，让你先恢复工作，过一会再通知你保险柜（PoP）已经彻底锁好。
+- **CleanInvalid**：管家要求你把手里修改过的包裹交回总仓库，然后必须当面把你自己柜子里的那份烧毁（Invalid）。
+- **CleanInvalidPoPA**：管家执行跨空间大扫除，把包裹彻底刷过物理别名点（PoPA），确保在其他平行物理空间也能看到这件货。
+- **CleanInvalidStorage**：最彻底的清空，管家要求把包裹从所有缓存销毁，并确认数据已经物理写入了最底层的闪存颗粒（PoPS）。
+
+##### 3. 权限与状态切换（所有权流转）
+
+- **MakeInvalid**：管家冷酷地通知你：“不管你手里的包裹是不是新的，立刻把它扔了，我不需要你交回仓库。”
+- **CleanUnique**：你告诉管家：“我手里有这件货，但我现在想改它，请帮我收回别人手里的钥匙，让我一个人独占。”
+- **MakeUnique**：你告诉管家：“我要彻底重画这幅画，把别人的副本都烧了，我也不需要旧的数据，直接给我独占写权限。”
+- **Evict**：你主动告诉管家：“我的柜子满了，这件货我也不打算用了，权限我还给你，但这货没改过，我就不麻烦你存回仓库了。”
+
+
+
+#### 一句话搞清楚何时选用上述何种CHI Dataless事务
+
+##### 1. 获取写权限（我要修改数据）
+
+- **CleanUnique**：当你只有读权限（Shared）但想**修改部分字节**时，用它来拿独占权并同步最新数据。
+- **MakeUnique**：当你准备**覆盖整行数据**时，用它来最快获取独占权（因为它不产生数据传输）。
+
+##### 2. 缓存清理（我想同步或腾位置）
+
+- **CleanShared**：想把脏数据**推回内存**供他人查看，但自己还想留一份继续读时选用。
+- **CleanInvalid**：想同步脏数据到内存，且同步完后**彻底放弃**该缓存行时选用。
+- **MakeInvalid**：本地缓存行已无用，想**直接丢弃**且不需要写回内存（哪怕它是脏的）时选用。
+- **Evict**：本地缓存行是干净的（Clean），仅仅因为**空间不足**想通知家乡节点（HN）你要放弃权限时选用。
+
+##### 3. 持久化与存储（我要确保数据不丢）
+
+- **CleanSharedPersist**：需要确保数据**掉电不丢失**，但之后仍需高频读取该数据时选用。
+- **CleanInvalidPoPA**：在**机密计算**切换内存归属空间（PAS）前，确保旧空间的残余数据彻底物理清除时选用。
+- **CleanInvalidStorage**：必须确认数据已**物理落盘**（如 SSD 颗粒）以满足极高可靠性要求时选用。
+
+##### 4. 缓存推送（我把数据喂给别人）
+
+- **StashOnceUnique**：想把数据连带**写权限**一起“推”给特定的 CPU 核心以减少其写延迟时选用。
+- **StashOnceShared**：只想把数据“推”给目标 CPU **读**（如处理报文头），且不想让目标 CPU 负责写回时选用。
+
+
+
+#### CHI协议中对Dataless事务的详细阐述
+
+这类事务的特点是，数据（Data）不被包含在response中。这类数据通常用来执行一些coherence操作。
+
+这类事务可以分成几类，
+
+- 一类是StashOnceUnique, StashOnceSepUnique, StashOnceShared, StashOnceSepShared这类独立的Stash操作，用于优化性能；
+- 一类是单纯缓存一致性的维护操作（CMO, cache maintenance transactions）, 比如CleanShared, CleanSharedPersist, CleanSharedPersistSep, CleanInvalid, CleanInvalidPoPA, CleanInvalidStorage, MakeInvalid；注意在这类操作中，RN不得理会Response中的cache状态信息
+- 一类是CMO操作加上独占性操作，比如CleanUnique，MakeUnique；
+- 一类是缓存驱逐操作，单指Evict。
+
+##### CleanUnique
+
+一般用于Requester自身已有一份shared状态的缓存行，且希望获得该缓存行的独占权以完成后续对该缓存行的写。其他核如果有Dirty的该缓存行，需要写回主存。当Requester不能保证后续对该缓存行的写为全行写，可能为partial写时，使用该事务。
+
+##### MakeUnique
+
+与CleanUnique的区别是，其他核如果有Dirty的该缓存行，不需要写回主存。MakeUnique仅用于当Requester即将对该缓存行的**全部**字节执行写操作。
+
+##### Evict
+
+用来驱逐处于clean状态的缓存行。Evict用于某缓存行不再被RN需要的时候。
+
+##### StashOnceUnique, StashOnceSepUnique
+
+StashOnceUnique的语义是请求者发送一个 Stash 请求到 HN（Home Node），指示 HN 将特定的缓存行推送到某个目标 CPU（Target），并且要求该目标 CPU 最终处于 **Unique** 状态（即拥有写权限）。StashOnceUnique是一个单一事务流，HN在收到请求之后，会通过snoop机制通知目标CPU去获取数据。
+
+StashOnceSepUnique的语义和StashOnceUnique一直，但其中的Sep代表将推送动作和完成确认两件事情解耦。HN 会先给请求者返回一个 `StashDone` 响应，表示请求已被受理，而数据的实际搬运过程（Data Pull）则在后台异步进行。
+
+使用场景：
+
+1. 由一个非 CPU 节点（如网卡 NIC 或加速器）主动发起请求，将数据及其“写权限”提前搬运到某个特定的 CPU 缓存中。在传统的系统中，如果 IO 设备写数据到内存，CPU 稍后去读，会经历：`内存写回 -> CPU Cache Miss -> 内存读取` 的漫长路径。**StashOnceUnique** 的用意在于，在 CPU 真正需要数据前，就把数据从 IO 或内存推送到 CPU 的 L1/L2。带有 **"Unique"** 后缀意味着不仅推送数据，还要求目标 CPU 获得 **Unique (Writable)** 状态。这样 CPU 拿到数据后可以直接修改（例如修改报文头），无需再发起 `CleanUnique` 事务来获取写权限。
+
+注意事项：
+
+1. StashOnceSepUnique相比StashOnceUnique，其释放资源的速度更快，但所需的硬件支持也更为复杂。
+
+2. DataPull 并不是一个独立的消息类型，而是一个**动作序列**。 当请求者（如加速器）发送 `StashOnceUnique` 给 HN 时，HN 并不会直接强行把数据塞给目标 CPU（这会把 CPU 的内部流水线搞乱），而是通过 **SnpStashUnique** 信号“敲敲门”，问 CPU：“你要不要这行数据？”如果目标 CPU 觉得现在缓存有空位，它就会发回一个 **DataPull 请求**。
+   1. 标准的DataPull交互流程是这样的：请求节点（RN-I）发送 `StashOnceUnique` 给 HN。HN 发现是 Stash 请求，向目标 CPU（RN-F）发送 **`SnpStashUnique`**。目标 CPU 接收到该 Snoop。如果它愿意接收这行数据，它会向 HN 发送一个带有特殊标记的 **`ReadUnique`**（这就是所谓的 DataPull）。HN 将数据（通过 `CompData`）发送给目标 CPU。目标 CPU 现在拥有了该行的独占权（Unique Clean/Dirty），可以直接进行写操作。
+   2. DataPull机制的好处在于避免“强推”导致的问题。如果数据被强行推入 CPU 缓存，而 CPU 此时正在忙于处理其他高优先级任务，或者缓存已经满了，强推会导致缓存污染或流水线阻塞。**DataPull 让 CPU 拥有拒绝权**：如果 CPU 缓存太忙，它可以选择不发起 DataPull。
+   3. 即：DataPull = Snoop 诱导 + CPU 主动拉取。
+3. 这里的Once可以理解为不建立“粘性” (Non-Sticky)。在总线协议设计中，Stash 操作有两种潜在的逻辑：1. **非 Once (持久型/预取型)：** 告诉缓存，“这一块数据很重要，请把它加载进来，并且尽可能长时间地保留它，哪怕最近没用到”。2. **Once (一次性推送)：** 告诉缓存，“我把这行数据推给你，**仅供你下一次操作使用**。用完之后，这行数据的替换权重（Replacement Policy）和普通数据一样”。这样可以防止**缓存污染**。如果 IO 设备源源不断地向 CPU 缓存推送数据，而这些数据被标记为“长期保留”，那么 CPU 自己的局部性数据（Local Data）就会被挤出缓存。加上 "Once"，意味着这只是一个**临时的性能暗示**。
+
+##### StashOnceShared, StashOnceSepShared
+
+前面两个事务（StashOnceUnique, StashOnceSepUnique）会把DataPull当成ReadUnique事务看待，而这两个事务（StashOnceShared和StashOnceSepShared）会把DataPull当成ReadNotSharedDirty事务看待。
+
+场景：一般用于使某CPU提前拥有对某缓存行的读权限。这里把DataPull当成ReadNotSharedDirty事务主要是为了避免复杂的SharedDirty状态机。
+
+##### CleanShared
+
+用来让其他的缓存行副本的状态都变成Non-dirty的（Clean或Invalid），dirty的副本必须写回memory。
+
+##### CleanSharedPersist
+
+用来让其他的缓存行副本的状态都变成Non-dirty的（Clean或Invalid），比CleanShared事务更进一步，CleanSharedPersist事务要求dirty的副本必须写回所谓Point of Persistence (PoP)（**Point of Persistence (PoP)** 指的是系统中一个特定的位置，一旦数据到达这里，即便系统**掉电（Power Failure）**，数据也不会丢失。其通常指 **非易失性存储器（NVM）**，如持久内存（Persistent Memory, PMEM）或 Flash。）
+
+##### CleanSharedPersistSep
+
+大体与CleanSharedPersist相同，但是Response可以分两步（Requester也需要支持一步完成的）
+
+##### CleanInvalid
+
+用来让其他的缓存行副本的状态都变成Invalid的，dirty的副本必须写回memory.
+
+##### CleanInvalidPoPA
+
+这个事务比较冷门，主要出现在支持 **Arm 机密计算架构 (Arm CCA)** 或多物理地址空间（Multi-PAS）的系统中。在支持机密计算（如 Arm Realm Management Extension）的系统中，同一个物理内存可能会被映射到不同的 **物理地址空间 (Physical Address Space, PAS)**。例如：**Secure PAS** (安全空间)、**Non-secure PAS** (非安全空间)、**Realm PAS** (机密空间)、**Root PAS** (根空间)。**PoPA**  (Point of Physical Aliasing)是系统中的一个物理位置（通常在内存控制器的前级），在该位置之后，系统不再区分请求来自哪个 PAS，而是直接映射到真正的物理存储介质。也就是它是解决“地址别名（Aliasing）”导致的一致性问题的终点。
+
+CleanInvalidPoPA在将指定地址范围内的所有“脏数据（Dirty）”从 Cache 中推出去且将所有 Cache 副本设为无效（Invalid）的同时规定，这种CMO操作的深度必须达到 **Point of Physical Aliasing** 之后。它确保了当数据经过 PoPA 点后，你在 **PAS A** 写入的数据，能够被 **PAS B** 正确地看到。
+
+##### CleanInvalidStorage
+
+用来让其他的缓存行副本的状态都变成Invalid的，dirty的副本必须写回PoPS (Point of Physical Storage). 
+
+- **PoPS (Point of Physical Storage)指 **物理存储点**，这是最深的一层。它保证数据不仅进入了持久化层（PoP），而且已经写入了**最终的物理介质（如 NAND Flash 的存储单元或磁盘盘片）
+- PoPS 确保了“绝对的安全”。在某些严格的合规性场景或文件系统操作中，仅到达 PoP（可能还在闪存控制器的电容保护缓存里）是不够的，必须到达 PoPS。
+
+##### MakeInvalid
+
+用来让其他的缓存行副本的状态都变成Invalid的，dirty的副本允许直接丢弃。
