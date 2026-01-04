@@ -555,3 +555,120 @@ CleanInvalidPoPA在将指定地址范围内的所有“脏数据（Dirty）”�
 ##### MakeInvalid
 
 用来让其他的缓存行副本的状态都变成Invalid的，dirty的副本允许直接丢弃。
+
+
+
+### 写事务（Write Transactions）
+
+CHI中的写事务可以粗略分为覆盖写（Immediate），腾位置（CopyBack），预存（Stash），非一致性写（WriteNoSnp）
+
+#### 一句话搞清楚CHI中不同Write事务的语义
+
+##### 一、 Immediate 类 (直写类：人狠话不多，直接推数据)
+
+- **WriteNoSnp (Full/Ptl):** “发往非一致性区域的普通快递，不查附近邻居，直接送到目的地。”
+- **WriteNoSnpDef:** “可以晚点再发的普通快递，允许我一次寄好几件且不用按顺序等回执。”
+- **WriteNoSnpZero:** “给目的地发个电报，告诉他：‘把这块地儿全填成零’，但我不用寄实物。”
+- **WriteUniqueFull:** “霸道总裁式写回：我手里有全套新货，你们邻居手里的旧货全给我作废，直接存入总库。”
+- **WriteUniquePtl:** “精准修改：我只改其中几个零件，但你们邻居手里的整套旧货也得全部作废。”
+- **WriteUniqueZero:** “一致性清零：不用寄数据，但要通知全系统把这行旧数据作废，并清空为零。”
+- **WriteUniqueFullStash:** “写回并定向安利：我写数据的同时，顺便让管家把这行新数据塞到某个特定邻居的包里。”
+
+------
+
+##### 二、 CopyBack 类 (放回类：把原本就在我这的东西还回去)
+
+- **WriteBackFull:** “我不留了：把我在本地改过的这行脏数据，完整地还给下一级并清空我自己的库存。”
+- **WriteBackPtl:** “碎块归还：我本地只有一部分是脏数据，只把这几个改过的碎块还回去，然后我不留了。”
+- **WriteCleanFull:** “备份同步：我本地继续留着这行，但同步一份最新版给总库，让我这行的状态变‘干净’。”
+- **WriteEvictFull:** “权限转交：这行我没改过，但我原本是独占的，现在我不要了，把这份‘独占特权’连同数据一起转交给下一级。”
+- **WriteEvictOrEvict:** “商量着办：我要丢弃这行独占数据，问问管家你要不要存？你要我就寄（WriteEvict），你不要我就直接扔（Evict）。”
+
+#### 一句话搞清楚CHI中不同写事务的使用场景
+
+- **WriteUniqueFull**：**【内存初始化/DMA】** 我手里有一整行新数据要“强行占领”这个地址，所有人手里的旧货立刻扔掉。
+- **WriteUniquePtl**：**【非对齐写/碎片修改】** 我只想改一行里的某几个字节，但也要霸道地让别人手里的整行失效。
+- **WriteUniqueFullStash**：**【生产者-消费者模式】** 我刚算出一行结果，存入内存的同时，顺便“推”到 CPU 缓存里让它赶紧处理。
+- **WriteBackFull**：**【Cache 替换】** 缓存满了，我得把这一行改过的（Dirty）数据还给内存，腾地方给别人。
+- **WriteCleanFull**：**【内存快照】** 数据我改好了，先发一份给内存备份（防止丢数据），但我自己还要留着继续读写。
+- **WriteEvictFull**：**【特权转移】** 我没改数据，但我之前是“独占”的，现在我不需要了，把这个“独占干净”的状态传给下一级。
+- **WriteEvictOrEvict**：**【带宽优化】** 我想扔掉一行没改过的数据，问问下一级缓存：“你要不要存？你要我才发数据，不要我就直接删了”。
+- **WriteNoSnp (Full/Ptl)**：**【非一致性/IO设备】** 发给显存或不用查缓存的设备，直接暴力存入，不跟其他 CPU 核心打招呼。
+
+#### CHI协议中对不同写事务的详细阐述
+
+CHI中的写事务可以分为两类：一类是所谓Immediate write transaction，流向可以是RN到HN，也可以是HN到SN。特点是在写之前RN不需要取得该缓存行的独占权（因为RN写完之后不想存该缓存行），而是把维护一致性的锅推给HN完成。另一类是CopyBack write transaction，这类的数据流向是去往下一级cache或者memory，同样也不需要对其他RN的snoop。
+
+##### WriteNoSnpFull
+
+从RN向Non-snoopable的地址区间写一整个（full）缓存行，或者从HN向SN写一整个缓存行。所有Byte Enable (BE)位必须为高
+
+##### WriteNoSnpPtl
+
+和WriteNoSnpFull相比，BE位可以全部为0，可以部分为0（写缓存行的一部分），也可以全部为1（写缓存行的全部），很灵活
+
+##### WriteNoSnpDef
+
+和WriteNoSnpFull,相同的是从RN向Non-snoopable的地址区间写一整个（full）缓存行，或者从HN向SN写一整个缓存行。所有Byte Enable (BE)位必须为高。
+
+不同的是，这些写是可推迟的（Deferrable），即只要数据被传送到路径中的一个**中间节点**（例如 Home Node 或缓存控制器），并且该节点保证之后一定会负责把数据写完，就可以立即返回确认信号。（因为这种写入不会触发其他核心缓存的查询（Snoop），因此系统可以放心地在中间环节拦截并确认，而不必同步等待全局一致性检查。）这种机制主要是为了降低延迟和提高带宽效率。
+
+注意事项：
+
+- 允许同一个RN发出多个Outstanding的Deferrable Write事务
+
+##### WriteNoSnpZero
+
+与WriteNoSnpFull相比，WriteNoSnpZero指示目标核向目标地址缓存行写全0. 因为写的数据已经确定（全0），后续RN或者HN不会再传输写数据。
+
+##### WriteUniqueFull
+
+向某块snoopable的地址区间发起全行写（full）。写前和写后，发起者的该缓存行状态都是Invalid。写数据进入memory或者SLC中。对于发起者RN来说，可以不理会一致性的维护问题，全权交给HN来解决。
+
+##### WriteUniquePtl
+
+与WriteUniqueFull相同，其他RN的该缓存行副本都会被invalidate；与WriteUniqueFull的唯一不同是，可以不是全行写（某些BE位可以不为1）。为了保证缓存行数据的完整性，写的部分缓存行数据直接从RN发向HN，在HN端完成合并。
+
+用法：某些只写不读的小流量数据（如日志记录，状态标志更新），可以显著降低其延迟；某些计算单元产生碎片化结果，直接丢给下游 SLC 处理，而不需要在本地保留副本。
+
+注意事项：WriteUniquePtl只是把合并这个脏活丢给了HN。
+
+##### WriteUniqueZero
+
+向某块snoopable的地址区间发起全0的全行写。同样的，后续写数据不会被传输。
+
+##### WriteUniqueFullStash
+
+发起者指示HN向某个RN发起stash的snp hint，如果该RN决定接受这个hint，就会发起datapull，把建议的对应地址的缓存行全行拉进自己对应的cache位置。
+
+##### WriteUniquePtlStash
+
+与WriteUniqueFullStash的唯一不同是，datapull的可以是缓存行的一部分。
+
+##### WriteBackFull
+
+把一整行Dirty状态的缓存行推给下一级缓存或者memory
+
+##### WriteBackPtl
+
+把Dirty状态的缓存行的一部分推给下一级缓存或者memory
+
+##### WriteCleanFull
+
+把一整行Dirty状态的缓存行推给下一级缓存或者memory的同时，保留一个clean的副本在本层级cache中
+
+##### WriteEvictFull
+
+把一整行UniqueClean状态的缓存行推给下一级缓存，当前层级cache中不保留副本。
+
+一般用于RN还想要保持对某个缓存行的独占权，但是当前层级cache放不下了，就把缓存行驱逐到下一个层级。
+
+##### WriteEvictOrEvict
+
+语义是：我这里有一行 UniqueClean（独占且干净）的数据要丢弃，我想顺便把数据传给下一级缓存（SLC），但如果你（HN）不想要，我就直接把它删了
+
+让HN根据自身情况自行决定。
+
+流程如下：RN 发送 `WriteEvictOrEvict` 请求给 HN。HN 根据自己当前的负载、SLC 的剩余空间等情况做决定：如果HN想要数据，就回复 `CompDBID`（包含 Data Buffer ID），告诉 RN：“把数据发给我吧”。如果HN不需要数据，就仅回复 `Comp`。RN 收到后直接在本地把该行设为 Invalid，不需要发送数据。
+
+RN可以通过LikelyShared字段对HN进行提示。如果 RN 认为这行数据以后可能被多个核心共享，它会在字段中标记。HN 看到这个提示后，更有可能决定“接收数据”并把它留在 SLC 中，以方便后续的读取请求。
