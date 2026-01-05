@@ -16,7 +16,7 @@ tags:
 
 # CHI事务类型
 
-CHI事务类型繁多，可分为Read、Write、Dataless、Combined Write、Atomic、Other六类。
+CHI事务类型繁多，可分为Read、Write、Dataless、Combined Write、Atomic、Other六类。其中，combined write事务是把write事务和缓存一致性的维护操作（CMO）合二为一，暂按下不表。
 
 ### 读事务（Read Transactions）
 
