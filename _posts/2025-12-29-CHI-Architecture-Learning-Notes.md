@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CHI-Architecture-Learning-Notes
+title: CHI-01-基本概念
 subtitle: 有你有我雪中送火，翻天覆海不枉最初
 date: 2025-12-29
 author: George Lin

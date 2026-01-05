@@ -1,6 +1,6 @@
 ---
 layout: post
-title: CHI Transaction Types
+title: CHI-02-事务类型
 subtitle: 欲速则不达，心淡则事圆
 date: 2025-12-17
 author: George Lin
