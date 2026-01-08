@@ -48,11 +48,12 @@ jQuery(document).ready(function($) {
     //primary navigation slide-in effect
     if ($(window).width() > MQL) {
         var headerHeight = $('.navbar-custom').height(),
-            bannerHeight  = $('.intro-header .container').height();     
-        $(window).on('scroll', {
-                previousTop: 0
-            },
-            function() {
+            bannerHeight  = $('.intro-header .container').height(),
+            scrollData = {
+                previousTop: $(window).scrollTop()
+            };
+        
+        $(window).on('scroll', scrollData, function() {
                 var currentTop = $(window).scrollTop(),
                     $catalog = $('.side-catalog');
 

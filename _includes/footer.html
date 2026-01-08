@@ -176,10 +176,13 @@
 
 <!--fastClick.js -->
 <script>
-    async("//cdnjs.cloudflare.com/ajax/libs/fastclick/1.0.6/fastclick.min.js", function(){
-        var $nav = document.querySelector("nav");
-        if($nav) FastClick.attach($nav);
-    })
+    // Only enable FastClick on touch devices to avoid interfering with mouse wheel scrolling
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        async("//cdnjs.cloudflare.com/ajax/libs/fastclick/1.0.6/fastclick.min.js", function(){
+            var $nav = document.querySelector("nav");
+            if($nav) FastClick.attach($nav);
+        })
+    }
 </script>
 
 
