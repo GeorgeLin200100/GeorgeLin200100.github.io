@@ -83,26 +83,34 @@
 		bindInterval: function() {
 			var self = this;
 			var docHeight;
+			var rafId = null;
 
 			self.$win.on('scroll.onePageNav', function() {
 				self.didScroll = true;
 			});
 
-			self.t = setInterval(function() {
+			function checkScroll() {
 				docHeight = self.$doc.height();
 
-				//If it was scrolled
+				//If it was scrolled, check immediately for responsive updates
 				if(self.didScroll) {
 					self.didScroll = false;
 					self.scrollChange();
 				}
 
-				//If the document height changes
+				//If the document height changes, update positions
 				if(docHeight !== self.docHeight) {
 					self.docHeight = docHeight;
 					self.getPositions();
 				}
-			}, 250);
+
+				// Use requestAnimationFrame for smooth 60fps performance
+				rafId = requestAnimationFrame(checkScroll);
+			}
+
+			// Start the animation frame loop
+			rafId = requestAnimationFrame(checkScroll);
+			self.rafId = rafId; // Store for cleanup
 		},
 
 		getHash: function($link) {
@@ -208,7 +216,12 @@
 		},
 
 		unbindInterval: function() {
-			clearInterval(this.t);
+			if(this.t) {
+				clearInterval(this.t);
+			}
+			if(this.rafId) {
+				cancelAnimationFrame(this.rafId);
+			}
 			this.$win.unbind('scroll.onePageNav');
 		}
 	};

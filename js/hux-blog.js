@@ -47,39 +47,52 @@ jQuery(document).ready(function($) {
 
     //primary navigation slide-in effect
     if ($(window).width() > MQL) {
-        var headerHeight = $('.navbar-custom').height(),
-            bannerHeight  = $('.intro-header .container').height(),
-            scrollData = {
-                previousTop: $(window).scrollTop()
-            };
+        var $navbar = $('.navbar-custom'),
+            $catalog = $('.side-catalog'),
+            headerHeight = $navbar.height(),
+            bannerHeight = $('.intro-header .container').height(),
+            previousTop = $(window).scrollTop(),
+            ticking = false;
         
-        $(window).on('scroll', scrollData, function() {
-                var currentTop = $(window).scrollTop(),
-                    $catalog = $('.side-catalog');
+        // Throttle scroll handler using requestAnimationFrame for smooth performance
+        function handleScroll() {
+            var currentTop = $(window).scrollTop();
 
-                //check if user is scrolling up by mouse or keyborad
-                if (currentTop < this.previousTop) {
-                    //if scrolling up...
-                    if (currentTop > 0 && $('.navbar-custom').hasClass('is-fixed')) {
-                        $('.navbar-custom').addClass('is-visible');
-                    } else {
-                        $('.navbar-custom').removeClass('is-visible is-fixed');
-                    }
+            //check if user is scrolling up by mouse or keyboard
+            if (currentTop < previousTop) {
+                //if scrolling up...
+                if (currentTop > 0 && $navbar.hasClass('is-fixed')) {
+                    $navbar.addClass('is-visible');
                 } else {
-                    //if scrolling down...
-                    $('.navbar-custom').removeClass('is-visible');
-                    if (currentTop > headerHeight && !$('.navbar-custom').hasClass('is-fixed')) $('.navbar-custom').addClass('is-fixed');
+                    $navbar.removeClass('is-visible is-fixed');
                 }
-                this.previousTop = currentTop;
+            } else {
+                //if scrolling down...
+                $navbar.removeClass('is-visible');
+                if (currentTop > headerHeight && !$navbar.hasClass('is-fixed')) {
+                    $navbar.addClass('is-fixed');
+                }
+            }
+            previousTop = currentTop;
 
-
-                //adjust the appearance of side-catalog
-                $catalog.show()
+            //adjust the appearance of side-catalog
+            if ($catalog.length) {
+                $catalog.show();
                 if (currentTop > (bannerHeight + 41)) {
-                    $catalog.addClass('fixed')
+                    $catalog.addClass('fixed');
                 } else {
-                    $catalog.removeClass('fixed')
+                    $catalog.removeClass('fixed');
                 }
-            });
+            }
+            
+            ticking = false;
+        }
+        
+        $(window).on('scroll', function() {
+            if (!ticking) {
+                window.requestAnimationFrame(handleScroll);
+                ticking = true;
+            }
+        });
     }
 });
