@@ -2,7 +2,7 @@
 layout: post
 title: CHI-02-事务类型
 subtitle: 欲速则不达，心淡则事圆
-date: 2025-12-17
+date: 2026-01-05
 author: George Lin
 header-img: img/post-bg-gen.png
 catalog: true
@@ -443,17 +443,17 @@ RN可以通过LikelyShared字段对HN进行提示。如果 RN 认为这行数据
 
 支持八种operation，包括STADD, STCLR, STEOR, STSET, STSMAX, STSMIN, STUMAX, STUMIN
 
-![image-20260105140645595](../images/2025-01-05-CHI-Transaction-Type.assets/image-20260105140645595.png)
+![image-20260105140645595](../images/2026-01-05-CHI-Transaction-Type.assets/image-20260105140645595.png)
 
-![image-20260105140657243](../images/2025-01-05-CHI-Transaction-Type.assets/image-20260105140657243.png)
+![image-20260105140657243](../images/2026-01-05-CHI-Transaction-Type.assets/image-20260105140657243.png)
 
 ##### AtomicLoad
 
 支持八种operation，包括LDADD, LDCLR, LDEOR, LDSET, LDSMAX, LDSMIN, LDUMAX, LDUMIN
 
-![image-20260105140839679](../images/2025-01-05-CHI-Transaction-Type.assets/image-20260105140839679.png)
+![image-20260105140839679](../images/2026-01-05-CHI-Transaction-Type.assets/image-20260105140839679.png)
 
-![image-20260105140852234](../images/2025-01-05-CHI-Transaction-Type.assets/image-20260105140852234.png)
+![image-20260105140852234](../images/2026-01-05-CHI-Transaction-Type.assets/image-20260105140852234.png)
 
 ##### AtomicSwap
 
