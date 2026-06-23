@@ -1,7 +1,7 @@
 ---
 layout:     post
-title:      MoE Training: MegaBlocks, FlexMoE and Fused
-subtitle:   MoE Training: MegaBlocks, FlexMoE and Fused
+title:      "MoE Training: MegaBlocks, FlexMoE and Fused"
+subtitle:   "MoE Training: MegaBlocks, FlexMoE and Fused"
 date:       2026-06-21
 author:     George Lin
 header-img: img/post-bg-gen.png

@@ -1,7 +1,7 @@
 ---
 layout:     post
-title:      MoE Training: DeepSpeed and Tutel
-subtitle:   MoE Training: DeepSpeed and Tutel
+title:      "MoE Training: DeepSpeed and Tutel"
+subtitle:   "MoE Training: DeepSpeed and Tutel"
 date:       2026-06-21
 author:     George Lin
 header-img: img/post-bg-gen.png
